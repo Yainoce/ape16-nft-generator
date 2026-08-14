@@ -56,11 +56,16 @@
     });
   }
   function violates(combo,rules){
-    for(const [a,b] of rules){
-      if(combo[a]===a.trait && combo[b]===b.trait) return true;
+  for(const [a,b] of rules){
+    if(
+      combo[a.category] === a.trait &&
+      combo[b.category] === b.trait
+    ){
+      return true;
     }
-    return false;
   }
+  return false;
+}
   function signature(combo,categories){
     return categories.map(c=>`${c.name}:${combo[c.name]}`).join("|");
   }

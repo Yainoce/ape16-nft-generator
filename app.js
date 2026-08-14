@@ -194,7 +194,59 @@ box.appendChild(row);
     $("renderInfo").textContent="Build the collection plan first.";
     $("auditPreview").textContent="No audit yet.";
   }
+function shuffleArray(items, rng){
+  for(let i=items.length-1;i>0;i--){
+    const j=Math.floor(rng()*(i+1));
+    [items[i],items[j]]=[items[j],items[i]];
+  }
+  return items;
+}
 
+function buildCategoryPool(category, supply, rng){
+  const pool=[];
+  let exactTotal=0;
+
+  for(const trait of category.traits){
+    const exact=Math.max(0,Math.floor(Number(trait.exact)||0));
+
+    if(exact>supply){
+      throw new Error(
+        `${category.name} / ${trait.name}: Exact Count cannot exceed supply ${supply}.`
+      );
+    }
+
+    exactTotal+=exact;
+
+    for(let i=0;i<exact;i++){
+      pool.push(trait.name);
+    }
+  }
+
+  if(exactTotal>supply){
+    throw new Error(
+      `${category.name}: Exact Counts total ${exactTotal}, which exceeds supply ${supply}.`
+    );
+  }
+
+  const remaining=supply-exactTotal;
+
+  const flexibleTraits=category.traits.filter(
+    trait=>(Number(trait.exact)||0)===0
+  );
+
+  if(remaining>0 && flexibleTraits.length===0){
+    throw new Error(
+      `${category.name}: Exact Counts only fill ${exactTotal} of ${supply} tokens.`
+    );
+  }
+
+  for(let i=0;i<remaining;i++){
+    const picked=weightedPick(flexibleTraits,rng);
+    pool.push(picked.name);
+  }
+
+  return shuffleArray(pool,rng);
+}
   $("buildBtn").addEventListener("click", async ()=>{
     try{
       setStatus("BUILDING","busy");

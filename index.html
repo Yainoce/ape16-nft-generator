@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#111111" />
+  <title>NFT Collection Generator</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>NFT Collection Generator</h1>
+        <p class="sub">iPad-friendly layered PNG generator • deterministic supply • rarity • exclusions • metadata</p>
+      </div>
+      <span id="status" class="pill idle">IDLE</span>
+    </header>
+
+    <section class="card">
+      <h2>1. Project</h2>
+      <div class="grid">
+        <label>Collection name
+          <input id="collectionName" value="APE16" />
+        </label>
+        <label>Supply
+          <input id="supply" type="number" min="1" max="100000" value="3333" />
+        </label>
+        <label>Seed
+          <input id="seed" value="APE16-GENESIS-001" />
+        </label>
+        <label>Image batch size
+          <input id="batchSize" type="number" min="10" max="500" value="150" />
+        </label>
+      </div>
+      <p class="hint">The seed makes generation repeatable. Same traits + same weights + same rules + same seed = same collection.</p>
+    </section>
+
+    <section class="card">
+      <h2>2. Load trait ZIP</h2>
+      <p>Your ZIP should contain folders such as <code>Background/</code>, <code>Body/</code>, <code>Clothes/</code>, <code>Eyes/</code>, <code>Mouth/</code>, <code>Headwear/</code>. Every trait PNG must use the same canvas size and alignment.</p>
+      <input id="zipInput" type="file" accept=".zip,application/zip" />
+      <div id="traitSummary" class="summary">No trait pack loaded.</div>
+    </section>
+
+    <section class="card">
+      <h2>3. Layer order & rarity</h2>
+      <div id="layers"></div>
+      <p class="hint">Weights are relative, not percentages. Example: 50, 30, 15, 5 produces approximately 50%, 30%, 15%, 5%.</p>
+    </section>
+
+    <section class="card">
+      <h2>4. Exclusion rules</h2>
+      <p>One rule per line. Format: <code>Category=Trait ! Category=Trait</code></p>
+      <textarea id="rules" rows="5" placeholder="Headwear=Red Hood ! Eyes=Flyboy&#10;Clothes=Hazmat ! Headwear=Miner Helmet"></textarea>
+      <p class="hint">If both sides occur in one token, that combination is rejected and rolled again.</p>
+    </section>
+
+    <section class="card">
+      <h2>5. Build collection plan</h2>
+      <button id="buildBtn" class="primary" disabled>Generate 3,333-token plan</button>
+      <button id="exportPlanBtn" disabled>Export manifest + metadata ZIP</button>
+      <div id="buildInfo" class="summary">Load traits first.</div>
+    </section>
+
+    <section class="card">
+      <h2>6. Render PNGs</h2>
+      <p>Images are rendered in batches to protect iPad memory. You can close/reopen the page and regenerate the same plan with the same seed and settings.</p>
+      <div class="grid">
+        <label>Start token
+          <input id="startToken" type="number" min="1" value="1" />
+        </label>
+        <label>Count
+          <input id="renderCount" type="number" min="1" max="500" value="150" />
+        </label>
+      </div>
+      <button id="renderBtn" disabled>Render PNG batch ZIP</button>
+      <progress id="progress" value="0" max="1"></progress>
+      <div id="renderInfo" class="summary">Build the collection plan first.</div>
+    </section>
+
+    <section class="card">
+      <h2>7. Rarity audit</h2>
+      <button id="auditBtn" disabled>Export rarity CSV</button>
+      <div id="auditPreview" class="summary">No audit yet.</div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

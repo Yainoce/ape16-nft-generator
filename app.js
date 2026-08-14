@@ -257,23 +257,69 @@ function buildCategoryPool(category, supply, rng){
       const seedText=$("seed").value || "NFT";
       const seed=xmur3(seedText)();
       const rng=mulberry32(seed);
-      const used=new Set(), plan=[];
-      let attempts=0;
-      const maxAttempts=Math.max(100000,supply*5000);
+      const pools={};
 
-      while(plan.length<supply && attempts<maxAttempts){
-        attempts++;
-        const combo={};
-        for(const cat of categories) combo[cat.name]=weightedPick(cat.traits,rng).name;
-        if(violates(combo,rules))continue;
-        const sig=signature(combo,categories);
-        if(used.has(sig))continue;
-        used.add(sig);
-        plan.push({tokenId:plan.length+1,traits:combo});
-      }
-      if(plan.length<supply){
-        throw new Error(`Could only create ${plan.length} unique valid combinations. Add more traits, loosen exclusions, or lower supply.`);
-      }
+for(const cat of categories){
+  pools[cat.name]=buildCategoryPool(cat,supply,rng);
+}
+
+let plan=[];
+let layoutAttempts=0;
+const maxLayoutAttempts=5000;
+let success=false;
+
+while(!success && layoutAttempts<maxLayoutAttempts){
+  layoutAttempts++;
+
+  const used=new Set();
+  const candidatePlan=[];
+  let valid=true;
+
+  for(let i=0;i<supply;i++){
+    const combo={};
+
+    for(const cat of categories){
+      combo[cat.name]=pools[cat.name][i];
+    }
+
+    if(violates(combo,rules)){
+      valid=false;
+      break;
+    }
+
+    const sig=signature(combo,categories);
+
+    if(used.has(sig)){
+      valid=false;
+      break;
+    }
+
+    used.add(sig);
+
+    candidatePlan.push({
+      tokenId:i+1,
+      traits:combo
+    });
+  }
+
+  if(valid && candidatePlan.length===supply){
+    plan=candidatePlan;
+    success=true;
+    break;
+  }
+
+  for(const cat of categories){
+    shuffleArray(pools[cat.name],rng);
+  }
+}
+
+if(!success){
+  throw new Error(
+    `Could not arrange ${supply} unique NFTs while preserving exact rarity counts and exclusion rules. Try adjusting exact counts, exclusions, or available traits.`
+  );
+}
+
+const attempts=layoutAttempts;
       state.plan=plan;
       state.categories=categories;
       $("startToken").max=supply; $("renderCount").value=Math.min(Number($("batchSize").value)||150,supply);

@@ -83,7 +83,14 @@
     bmp.close();
     return dims;
   }
+function updateBuildButton(){
+  const supply = Number($("supply").value) || 0;
+  $("buildBtn").textContent =
+    `Generate ${supply.toLocaleString()}-token plan`;
+}
 
+$("supply").addEventListener("input", updateBuildButton);
+updateBuildButton();
   $("zipInput").addEventListener("change", async e=>{
     const f=e.target.files[0]; if(!f)return;
     try{

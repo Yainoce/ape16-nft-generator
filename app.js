@@ -110,8 +110,27 @@
         if(cw!==w || ch!==h) throw new Error(`Canvas mismatch: ${pngs[i].name} is ${cw}×${ch}, expected ${w}×${h}.`);
       }
       state.zip=zip;
-      state.categories=[...cats].map(([name,traits])=>({name,traits}));
-      renderLayers();
+
+const preferredOrder = [
+  "Background",
+  "Body",
+  "Clothes",
+  "Eyes",
+  "Mouth",
+  "Headwear",
+  "Accessories"
+];
+
+state.categories=[...cats].map(([name,traits])=>({name,traits}));
+state.categories.sort((a,b)=>{
+  const ai=preferredOrder.indexOf(a.name);
+  const bi=preferredOrder.indexOf(b.name);
+  const aOrder=ai === -1 ? preferredOrder.length : ai;
+  const bOrder=bi === -1 ? preferredOrder.length : bi;
+  return aOrder-bOrder || a.name.localeCompare(b.name);
+});
+
+renderLayers();
       $("traitSummary").textContent=`Loaded ${pngs.length} PNG traits across ${state.categories.length} categories.\nCanvas: ${w}×${h}px\nAll PNG canvases match.`;
       $("buildBtn").disabled=false;
       state.plan=[];

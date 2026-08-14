@@ -263,63 +263,180 @@ for(const cat of categories){
   pools[cat.name]=buildCategoryPool(cat,supply,rng);
 }
 
-let plan=[];
-let layoutAttempts=0;
-const maxLayoutAttempts=5000;
-let success=false;
+function countsFromPool(pool){
+  const counts={};
 
-while(!success && layoutAttempts<maxLayoutAttempts){
-  layoutAttempts++;
+  for(const traitName of pool){
+    counts[traitName]=(counts[traitName]||0)+1;
+  }
 
-  const used=new Set();
-  const candidatePlan=[];
-  let valid=true;
+  return counts;
+}
 
-  for(let i=0;i<supply;i++){
-    const combo={};
+function cloneCounts(source){
+  const copy={};
 
-    for(const cat of categories){
-      combo[cat.name]=pools[cat.name][i];
+  for(const [category,traits] of Object.entries(source)){
+    copy[category]={...traits};
+  }
+
+  return copy;
+}
+
+function shuffledAvailableTraits(category,remaining,rng){
+  const choices=[];
+
+  for(const trait of category.traits){
+    const count=remaining[category.name][trait.name]||0;
+
+    if(count>0){
+      choices.push({
+        name:trait.name,
+        count
+      });
+    }
+  }
+
+  // Favor traits with more remaining copies, while retaining randomness.
+  const ordered=[];
+
+  while(choices.length){
+    const total=choices.reduce((sum,item)=>sum+item.count,0);
+    let roll=rng()*total;
+    let chosenIndex=0;
+
+    for(let i=0;i<choices.length;i++){
+      roll-=choices[i].count;
+
+      if(roll<=0){
+        chosenIndex=i;
+        break;
+      }
     }
 
+    ordered.push(choices[chosenIndex].name);
+    choices.splice(chosenIndex,1);
+  }
+
+  return ordered;
+}
+
+function buildOneToken(
+  categoryIndex,
+  combo,
+  categories,
+  remaining,
+  rules,
+  used,
+  rng
+){
+  if(categoryIndex===categories.length){
+    const sig=signature(combo,categories);
+
+    if(used.has(sig)){
+      return null;
+    }
+
+    return {...combo};
+  }
+
+  const category=categories[categoryIndex];
+
+  const candidates=shuffledAvailableTraits(
+    category,
+    remaining,
+    rng
+  );
+
+  for(const traitName of candidates){
+    combo[category.name]=traitName;
+
     if(violates(combo,rules)){
-      valid=false;
+      delete combo[category.name];
+      continue;
+    }
+
+    remaining[category.name][traitName]--;
+
+    const result=buildOneToken(
+      categoryIndex+1,
+      combo,
+      categories,
+      remaining,
+      rules,
+      used,
+      rng
+    );
+
+    if(result){
+      return result;
+    }
+
+    remaining[category.name][traitName]++;
+    delete combo[category.name];
+  }
+
+  return null;
+}
+
+const startingCounts={};
+
+for(const cat of categories){
+  startingCounts[cat.name]=countsFromPool(
+    pools[cat.name]
+  );
+}
+
+let plan=[];
+let success=false;
+let attempts=0;
+
+const maxPlanAttempts=250;
+
+while(!success && attempts<maxPlanAttempts){
+  attempts++;
+
+  const remaining=cloneCounts(startingCounts);
+  const used=new Set();
+  const candidatePlan=[];
+  let failed=false;
+
+  for(let tokenIndex=0;tokenIndex<supply;tokenIndex++){
+    const combo=buildOneToken(
+      0,
+      {},
+      categories,
+      remaining,
+      rules,
+      used,
+      rng
+    );
+
+    if(!combo){
+      failed=true;
       break;
     }
 
     const sig=signature(combo,categories);
-
-    if(used.has(sig)){
-      valid=false;
-      break;
-    }
-
     used.add(sig);
 
     candidatePlan.push({
-      tokenId:i+1,
+      tokenId:tokenIndex+1,
       traits:combo
     });
   }
 
-  if(valid && candidatePlan.length===supply){
+  if(!failed && candidatePlan.length===supply){
     plan=candidatePlan;
     success=true;
-    break;
-  }
-
-  for(const cat of categories){
-    shuffleArray(pools[cat.name],rng);
   }
 }
 
 if(!success){
   throw new Error(
-    `Could not arrange ${supply} unique NFTs while preserving exact rarity counts and exclusion rules. Try adjusting exact counts, exclusions, or available traits.`
+    `Could not construct ${supply} unique NFTs while preserving exact rarity counts and exclusion rules. The requested trait counts or rules may be mathematically incompatible.`
   );
 }
-
-const attempts=layoutAttempts;
       state.plan=plan;
       state.categories=categories;
       $("startToken").max=supply; $("renderCount").value=Math.min(Number($("batchSize").value)||150,supply);

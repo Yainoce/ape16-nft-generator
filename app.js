@@ -194,59 +194,174 @@ box.appendChild(row);
     $("renderInfo").textContent="Build the collection plan first.";
     $("auditPreview").textContent="No audit yet.";
   }
-function shuffleArray(items, rng){
-  for(let i=items.length-1;i>0;i--){
-    const j=Math.floor(rng()*(i+1));
-    [items[i],items[j]]=[items[j],items[i]];
+function weightedOrderForPlanner(items, weightFn, rng){
+  const remaining=[...items];
+  const out=[];
+  while(remaining.length){
+    const weights=remaining.map(item=>Math.max(0,Number(weightFn(item))||0));
+    const total=weights.reduce((a,b)=>a+b,0);
+    if(total<=0){
+      for(let i=remaining.length-1;i>0;i--){
+        const j=Math.floor(rng()*(i+1));
+        [remaining[i],remaining[j]]=[remaining[j],remaining[i]];
+      }
+      out.push(...remaining);
+      break;
+    }
+    let roll=rng()*total;
+    let chosen=remaining.length-1;
+    for(let i=0;i<remaining.length;i++){
+      roll-=weights[i];
+      if(roll<=0){ chosen=i; break; }
+    }
+    out.push(remaining[chosen]);
+    remaining.splice(chosen,1);
   }
-  return items;
+  return out;
 }
 
-function buildCategoryPool(category, supply, rng){
-  const pool=[];
-  let exactTotal=0;
+function validateExactSetup(categories,supply){
+  for(const cat of categories){
+    let exactTotal=0;
+    let flexible=0;
+    for(const trait of cat.traits){
+      const exact=Math.max(0,Math.floor(Number(trait.exact)||0));
+      if(exact>supply){
+        throw new Error(`${cat.name} / ${trait.name}: Exact Count cannot exceed supply ${supply}.`);
+      }
+      exactTotal+=exact;
+      if(exact===0 && (Number(trait.weight)||0)>0) flexible++;
+    }
+    if(exactTotal>supply){
+      throw new Error(`${cat.name}: Exact Counts total ${exactTotal}, which exceeds supply ${supply}.`);
+    }
+    if(exactTotal<supply && flexible===0){
+      throw new Error(`${cat.name}: Exact Counts fill ${exactTotal} of ${supply}, but no flexible trait has positive weight.`);
+    }
+  }
+}
 
-  for(const trait of category.traits){
-    const exact=Math.max(0,Math.floor(Number(trait.exact)||0));
+function createExactState(categories){
+  const initial={};
+  const totals={};
+  for(const cat of categories){
+    initial[cat.name]={};
+    let total=0;
+    for(const trait of cat.traits){
+      const exact=Math.max(0,Math.floor(Number(trait.exact)||0));
+      if(exact>0){
+        initial[cat.name][trait.name]=exact;
+        total+=exact;
+      }
+    }
+    totals[cat.name]=total;
+  }
+  return {initial,totals};
+}
 
-    if(exact>supply){
-      throw new Error(
-        `${category.name} / ${trait.name}: Exact Count cannot exceed supply ${supply}.`
+function cloneRemainingExact(initial){
+  const out={};
+  for(const [cat,traits] of Object.entries(initial)) out[cat]={...traits};
+  return out;
+}
+
+function plannerCategoryOrder(categories,rules,exactTotals){
+  const degree={};
+  for(const cat of categories) degree[cat.name]=0;
+  for(const [a,b] of rules){
+    degree[a.category]=(degree[a.category]||0)+1;
+    degree[b.category]=(degree[b.category]||0)+1;
+  }
+  return categories.map(c=>c.name).sort((a,b)=>{
+    if((degree[b]||0)!==(degree[a]||0)) return (degree[b]||0)-(degree[a]||0);
+    if((exactTotals[b]||0)!==(exactTotals[a]||0)) return (exactTotals[b]||0)-(exactTotals[a]||0);
+    const ca=categories.find(c=>c.name===a).traits.length;
+    const cb=categories.find(c=>c.name===b).traits.length;
+    return ca-cb;
+  });
+}
+
+function planCollectionExact(categories,rules,supply,seedText,maxRestarts=250){
+  validateExactSetup(categories,supply);
+  const displayOrder=categories.map(c=>c.name);
+  const {initial,totals}=createExactState(categories);
+  const order=plannerCategoryOrder(categories,rules,totals);
+
+  for(let restart=0;restart<maxRestarts;restart++){
+    const restartSeed=xmur3(`${seedText}:${restart}`)();
+    const rng=mulberry32(restartSeed);
+    const remaining=cloneRemainingExact(initial);
+    const used=new Set();
+    const plan=[];
+
+    function buildCombo(categoryIndex,tokenIndex,combo){
+      if(categoryIndex===order.length){
+        const sig=signature(combo,categories);
+        return used.has(sig) ? null : {...combo};
+      }
+
+      const catName=order[categoryIndex];
+      const cat=categories.find(c=>c.name===catName);
+      const tokensAfter=supply-tokenIndex-1;
+      const exactLeft=Object.values(remaining[catName]).reduce((a,b)=>a+b,0);
+      const candidates=[];
+
+      for(const trait of cat.traits){
+        const exact=Math.max(0,Math.floor(Number(trait.exact)||0));
+        if(exact>0){
+          if((remaining[catName][trait.name]||0)>0) candidates.push(trait);
+        } else if(exactLeft<=tokensAfter && (Number(trait.weight)||0)>0){
+          candidates.push(trait);
+        }
+      }
+
+      const ordered=weightedOrderForPlanner(candidates,trait=>{
+        const exact=Math.max(0,Math.floor(Number(trait.exact)||0));
+        return exact>0 ? (remaining[catName][trait.name]||0) : (Number(trait.weight)||0);
+      },rng);
+
+      for(const trait of ordered){
+        combo[catName]=trait.name;
+        if(violates(combo,rules)){
+          delete combo[catName];
+          continue;
+        }
+
+        const isExact=Math.max(0,Math.floor(Number(trait.exact)||0))>0;
+        if(isExact) remaining[catName][trait.name]--;
+
+        const result=buildCombo(categoryIndex+1,tokenIndex,combo);
+        if(result) return result;
+
+        if(isExact) remaining[catName][trait.name]++;
+        delete combo[catName];
+      }
+      return null;
+    }
+
+    let failed=false;
+    for(let tokenIndex=0;tokenIndex<supply;tokenIndex++){
+      const combo=buildCombo(0,tokenIndex,{});
+      if(!combo){ failed=true; break; }
+      used.add(signature(combo,categories));
+      plan.push({tokenId:tokenIndex+1,traits:combo});
+    }
+
+    if(!failed && plan.length===supply){
+      const remainingExact=Object.values(remaining).reduce(
+        (sum,traits)=>sum+Object.values(traits).reduce((a,b)=>a+b,0),0
       );
-    }
-
-    exactTotal+=exact;
-
-    for(let i=0;i<exact;i++){
-      pool.push(trait.name);
+      if(remainingExact===0){
+        return {plan,attempts:restart+1};
+      }
     }
   }
 
-  if(exactTotal>supply){
-    throw new Error(
-      `${category.name}: Exact Counts total ${exactTotal}, which exceeds supply ${supply}.`
-    );
-  }
-
-  const remaining=supply-exactTotal;
-
-  const flexibleTraits=category.traits.filter(
-    trait=>(Number(trait.exact)||0)===0
+  throw new Error(
+    `Could not construct ${supply} unique NFTs while preserving exact rarity counts and exclusion rules. The requested constraints may be mathematically incompatible.`
   );
-
-  if(remaining>0 && flexibleTraits.length===0){
-    throw new Error(
-      `${category.name}: Exact Counts only fill ${exactTotal} of ${supply} tokens.`
-    );
-  }
-
-  for(let i=0;i<remaining;i++){
-    const picked=weightedPick(flexibleTraits,rng);
-    pool.push(picked.name);
-  }
-
-  return shuffleArray(pool,rng);
 }
+
   $("buildBtn").addEventListener("click", async ()=>{
     try{
       setStatus("BUILDING","busy");
@@ -255,193 +370,14 @@ function buildCategoryPool(category, supply, rng){
       const categories=currentCategories();
       const rules=parseRules();
       const seedText=$("seed").value || "NFT";
-      const seed=xmur3(seedText)();
-      const rng=mulberry32(seed);
-      const pools={};
-
-for(const cat of categories){
-  pools[cat.name]=buildCategoryPool(cat,supply,rng);
-}
-
-function countsFromPool(pool){
-  const counts={};
-
-  for(const traitName of pool){
-    counts[traitName]=(counts[traitName]||0)+1;
-  }
-
-  return counts;
-}
-
-function cloneCounts(source){
-  const copy={};
-
-  for(const [category,traits] of Object.entries(source)){
-    copy[category]={...traits};
-  }
-
-  return copy;
-}
-
-function shuffledAvailableTraits(category,remaining,rng){
-  const choices=[];
-
-  for(const trait of category.traits){
-    const count=remaining[category.name][trait.name]||0;
-
-    if(count>0){
-      choices.push({
-        name:trait.name,
-        count
-      });
-    }
-  }
-
-  // Favor traits with more remaining copies, while retaining randomness.
-  const ordered=[];
-
-  while(choices.length){
-    const total=choices.reduce((sum,item)=>sum+item.count,0);
-    let roll=rng()*total;
-    let chosenIndex=0;
-
-    for(let i=0;i<choices.length;i++){
-      roll-=choices[i].count;
-
-      if(roll<=0){
-        chosenIndex=i;
-        break;
-      }
-    }
-
-    ordered.push(choices[chosenIndex].name);
-    choices.splice(chosenIndex,1);
-  }
-
-  return ordered;
-}
-
-function buildOneToken(
-  categoryIndex,
-  combo,
-  categories,
-  remaining,
-  rules,
-  used,
-  rng
-){
-  if(categoryIndex===categories.length){
-    const sig=signature(combo,categories);
-
-    if(used.has(sig)){
-      return null;
-    }
-
-    return {...combo};
-  }
-
-  const category=categories[categoryIndex];
-
-  const candidates=shuffledAvailableTraits(
-    category,
-    remaining,
-    rng
-  );
-
-  for(const traitName of candidates){
-    combo[category.name]=traitName;
-
-    if(violates(combo,rules)){
-      delete combo[category.name];
-      continue;
-    }
-
-    remaining[category.name][traitName]--;
-
-    const result=buildOneToken(
-      categoryIndex+1,
-      combo,
-      categories,
-      remaining,
-      rules,
-      used,
-      rng
-    );
-
-    if(result){
-      return result;
-    }
-
-    remaining[category.name][traitName]++;
-    delete combo[category.name];
-  }
-
-  return null;
-}
-
-const startingCounts={};
-
-for(const cat of categories){
-  startingCounts[cat.name]=countsFromPool(
-    pools[cat.name]
-  );
-}
-
-let plan=[];
-let success=false;
-let attempts=0;
-
-const maxPlanAttempts=250;
-
-while(!success && attempts<maxPlanAttempts){
-  attempts++;
-
-  const remaining=cloneCounts(startingCounts);
-  const used=new Set();
-  const candidatePlan=[];
-  let failed=false;
-
-  for(let tokenIndex=0;tokenIndex<supply;tokenIndex++){
-    const combo=buildOneToken(
-      0,
-      {},
-      categories,
-      remaining,
-      rules,
-      used,
-      rng
-    );
-
-    if(!combo){
-      failed=true;
-      break;
-    }
-
-    const sig=signature(combo,categories);
-    used.add(sig);
-
-    candidatePlan.push({
-      tokenId:tokenIndex+1,
-      traits:combo
-    });
-  }
-
-  if(!failed && candidatePlan.length===supply){
-    plan=candidatePlan;
-    success=true;
-  }
-}
-
-if(!success){
-  throw new Error(
-    `Could not construct ${supply} unique NFTs while preserving exact rarity counts and exclusion rules. The requested trait counts or rules may be mathematically incompatible.`
-  );
-}
+      const result=planCollectionExact(categories,rules,supply,seedText);
+      const plan=result.plan;
+      const attempts=result.attempts;
       state.plan=plan;
       state.categories=categories;
       $("startToken").max=supply; $("renderCount").value=Math.min(Number($("batchSize").value)||150,supply);
       $("exportPlanBtn").disabled=false; $("renderBtn").disabled=false; $("auditBtn").disabled=false;
-      $("buildInfo").textContent=`SUCCESS\n${plan.length.toLocaleString()} unique tokens planned.\n${attempts.toLocaleString()} random rolls used.\nSeed: ${seedText}\nNo duplicate trait combinations.`;
+      $("buildInfo").textContent=`SUCCESS\n${plan.length.toLocaleString()} unique tokens planned.\n${attempts.toLocaleString()} planning attempt(s) used.\nSeed: ${seedText}\nNo duplicate trait combinations.`;
       showAudit();
       setStatus("PLAN READY","ok");
     }catch(err){

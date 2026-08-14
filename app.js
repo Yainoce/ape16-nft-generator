@@ -75,7 +75,8 @@
       const traits=[...layer.querySelectorAll(".trait-row")].map(row=>({
         name:row.dataset.trait,
         path:row.dataset.path,
-        weight:Number(row.querySelector("input").value)
+        weight:Number(row.querySelector('input[data-role="weight"]').value),
+        exact:Number(row.querySelector('input[data-role="exact"]').value) || 0
       }));
       return {name, traits};
     });
@@ -164,8 +165,25 @@ renderLayers();
         const row=document.createElement("div"); row.className="trait-row";
         row.dataset.trait=trait.name; row.dataset.path=trait.path;
         const name=document.createElement("div"); name.className="trait-name"; name.textContent=trait.name;
-        const input=document.createElement("input"); input.type="number"; input.min="0"; input.step="0.1"; input.value="1"; input.title="Weight";
-        row.append(name,input); box.appendChild(row);
+        const weight=document.createElement("input");
+weight.type="number";
+weight.min="0";
+weight.step="0.1";
+weight.value="1";
+weight.title="Weight";
+weight.dataset.role="weight";
+
+const exact=document.createElement("input");
+exact.type="number";
+exact.min="0";
+exact.step="1";
+exact.value="0";
+exact.title="Exact Count";
+exact.placeholder="Exact";
+exact.dataset.role="exact";
+
+row.append(name,weight,exact);
+box.appendChild(row);
       }
       host.appendChild(box);
     }
